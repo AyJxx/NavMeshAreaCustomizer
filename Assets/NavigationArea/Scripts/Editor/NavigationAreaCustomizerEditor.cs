@@ -20,6 +20,9 @@ namespace NavigationArea
 
             if (GUILayout.Button(Constants.BuildText))
                 ((NavigationAreaCustomizer)target).BuildNavMesh();
+            
+            if (GUILayout.Button(Constants.ClearText))
+                ((NavigationAreaCustomizer)target).ClearNavMesh();
         }
     }
 }

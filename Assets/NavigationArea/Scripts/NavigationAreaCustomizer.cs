@@ -96,7 +96,8 @@ namespace NavigationArea
 			foreach (var s in segments)
 			{
 				if (s.Value != null)
-					s.Value.CalculateArea(false);
+					//s.Value.CalculateArea(false);
+					s.Value.UpdateArea();
 				else
 					segmentsToRemove.Add(s.Key);
 			}
@@ -170,8 +171,10 @@ namespace NavigationArea
 		public void CalculateArea(bool manualInvoke)
 		{
 			foreach (var s in segments.Values)
+			{
 				if (s)
 					s.CalculateArea(manualInvoke);
+			}
 		}
 
 		public void BuildNavMesh()
@@ -181,6 +184,14 @@ namespace NavigationArea
 
 			CalculateArea(true);
 			navMeshSurface.BuildNavMesh();
+		}
+
+		public void ClearNavMesh()
+		{
+			if (!navMeshSurface)
+				navMeshSurface = GetComponentInParent<NavMeshSurface>();
+
+			navMeshSurface.RemoveData();
 		}
 	}
 }

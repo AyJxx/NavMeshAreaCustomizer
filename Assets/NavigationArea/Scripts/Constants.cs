@@ -10,7 +10,8 @@ namespace NavigationArea
 
         public const string AddSegmentText = "Add Segment";
         public const string CalculateAreaText = "Calculate Area";
-        public const string BuildText = "Build (Runtime)";
+        public const string BuildText = "Build NavMesh";
+        public const string ClearText = "Clear NavMesh";
         public const string AddPointText = "Add Point";
     }
 }
