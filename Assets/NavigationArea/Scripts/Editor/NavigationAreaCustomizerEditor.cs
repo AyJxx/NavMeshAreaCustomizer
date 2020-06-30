@@ -18,11 +18,13 @@ namespace NavigationArea
             if (GUILayout.Button(Constants.CalculateAreaText))
                 ((NavigationAreaCustomizer)target).CalculateArea(true);
 
+#if NAV_MESH_SURFACE
             if (GUILayout.Button(Constants.BuildText))
                 ((NavigationAreaCustomizer)target).BuildNavMesh();
             
             if (GUILayout.Button(Constants.ClearText))
                 ((NavigationAreaCustomizer)target).ClearNavMesh();
+#endif
         }
     }
 }

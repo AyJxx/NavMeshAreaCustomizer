@@ -36,7 +36,9 @@ namespace NavigationArea
 		private Shader navigationAreaSegmentShader;
 		private Material segmentMaterial;
 
+#if NAV_MESH_SURFACE
 		private NavMeshSurface navMeshSurface;
+#endif
 
 		private bool canUpdate = false;
 
@@ -63,8 +65,11 @@ namespace NavigationArea
 		private void OnEnable()
 		{
 #if UNITY_EDITOR
+
+#if NAV_MESH_SURFACE
 			if (!navMeshSurface)
 				navMeshSurface = GetComponentInParent<NavMeshSurface>();
+#endif
 
 			navigationAreaSegmentShader = (Shader)AssetDatabase.LoadAssetAtPath(Constants.NavigationAreaSegmentShaderPath, typeof(Shader));
 			Assert.IsNotNull(navigationAreaSegmentShader, $"Shader not found at path {Constants.NavigationAreaSegmentShaderPath}");
@@ -96,14 +101,15 @@ namespace NavigationArea
 			foreach (var s in segments)
 			{
 				if (s.Value != null)
-					//s.Value.CalculateArea(false);
-					s.Value.UpdateArea();
+					s.Value.CalculateArea(false);
 				else
 					segmentsToRemove.Add(s.Key);
 			}
 
 			foreach (var s in segmentsToRemove)
+			{
 				segments.Remove(s);
+			}
 		}
 
 		private void OnDisable()
@@ -159,10 +165,12 @@ namespace NavigationArea
 			segmentObj.transform.localRotation = Quaternion.identity;
 
 			var segmentComp = (NavigationAreaSegment)segmentObj.AddComponent(typeof(NavigationAreaSegment));
-			for (int i = 0; i < 3; i++)
+			for (int i = 0; i < 2; i++)
 				UnityEditorInternal.ComponentUtility.MoveComponentUp(segmentComp);
+
 			segmentComp.InitializePoints();
 			segmentComp.SetAreaMaterial(segmentMaterial);
+			segmentComp.OnValidate();
 			GameObjectUtility.SetStaticEditorFlags(segmentObj, StaticEditorFlags.NavigationStatic);
 
 			OnValidate();
@@ -177,6 +185,7 @@ namespace NavigationArea
 			}
 		}
 
+#if NAV_MESH_SURFACE
 		public void BuildNavMesh()
 		{
 			if (!navMeshSurface)
@@ -185,7 +194,9 @@ namespace NavigationArea
 			CalculateArea(true);
 			navMeshSurface.BuildNavMesh();
 		}
+#endif
 
+#if NAV_MESH_SURFACE
 		public void ClearNavMesh()
 		{
 			if (!navMeshSurface)
@@ -193,5 +204,6 @@ namespace NavigationArea
 
 			navMeshSurface.RemoveData();
 		}
+#endif
 	}
 }

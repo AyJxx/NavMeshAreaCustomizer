@@ -3,19 +3,13 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
-using UnityEditor.UIElements;
 using UnityEngine;
-using UnityEngine.Assertions;
-using UnityEngine.PlayerLoop;
-using UnityEngine.SocialPlatforms;
 
 namespace NavigationArea
 {
     [ExecuteInEditMode]
-    [RequireComponent(typeof(MeshCollider))]
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
     public class NavigationAreaSegment : MonoBehaviour
@@ -26,51 +20,55 @@ namespace NavigationArea
 		[Tooltip("This is collider of mesh on which NavMesh will be generated.")]
 		[SerializeField] private Collider terrainCollider;
 
-		private MeshCollider areaCollider;
 		private MeshFilter projectedArea;
 		private MeshRenderer areaRenderer;
 
-		private Mesh areaMesh;
 		private Mesh projectedAreaMesh;
 
 		private readonly List<Vector3> areaPoints = new List<Vector3>(); // Points in NavigationArea which are used to create arbitrary shape
 		private List<Vector3>[] segmentedAreaPoints; // Same as areaPoints but line from one point to another is segmented to multiple points
-		private int[] areaPointsTriangles;
+		private readonly List<Vector3> areaTriangles = new List<Vector3>();
 
 		private readonly List<Vector3> projectedAreaVertices = new List<Vector3>(); // These are vertices of mesh created in NavigationArea
 		private readonly List<int> projectedAreaTriangles = new List<int>();
+		private bool[] projectedVerticesTransformed;
 
 		private Vector3[] terrainVertices;
 		private int[] terrainTriangles;
 
+		private bool isUpdating = false; // Flag is secondary thread is already calculating projected area mesh
+		private bool pendingCalculation = false; // Flag if there is needed final calculation after user defined navigation area
+		private bool isDestroyed = false;
+
 		public bool RenderArea { get; set; }
 		public float AreaLineThickness { get; set; }
 		public float SegmentedLineStep { get; set; }
-
-		private readonly List<Vector3> areaTriangles = new List<Vector3>(); // !!!
-		private bool isUpdating = false; // !!!
-
-		private void OnValidate()
+		
+		public void OnValidate()
 		{
 			if (terrainMesh)
 			{
 				terrainVertices = terrainMesh.sharedMesh.vertices;
 				terrainTriangles = terrainMesh.sharedMesh.triangles;
+				projectedVerticesTransformed = new bool[terrainVertices.Length];
 			}
 		}
 
 		private void OnEnable()
 		{
-			areaCollider = GetComponent<MeshCollider>();
 			projectedArea = GetComponent<MeshFilter>();
 			areaRenderer = GetComponent<MeshRenderer>();
 
 			AreaRendering();
 
 #if UNITY_EDITOR
-			areaMesh = new Mesh();
 			projectedAreaMesh = new Mesh();
 #endif
+		}
+
+		private void OnDestroy()
+		{
+			isDestroyed = true;
 		}
 
 		private void OnDrawGizmos()
@@ -152,19 +150,19 @@ namespace NavigationArea
 				return;
 			}
 
-			OnValidate();
-
-			areaCollider.enabled = true;
 			areaRenderer.enabled = true;
 
-			SegmentArea();
-			GenerateProjectedArea();
+			AlignAreaPoints();
 
-			//if (!isUpdating)
-			//{
-			//	UpdateArea();
-			//	UpdateProjectedArea();
-			//}
+			if (!isUpdating)
+			{
+				UpdateArea();
+				GenerateProjectedArea();
+			}
+			else
+			{
+				pendingCalculation = true;
+			}
 		}
 
 		private void AssignClosestTerrain()
@@ -191,77 +189,47 @@ namespace NavigationArea
 		{
 			if (Application.isPlaying)
 			{
-				areaCollider.enabled = false;
 				areaRenderer.enabled = false;
 			}
 			else
 			{
-				areaCollider.enabled = true;
 				areaRenderer.enabled = RenderArea;
 			}
 		}
 
-		// Creating collider specified by points in navigation area
-		public void UpdateArea()
+		private void AlignAreaPoints()
+		{
+			for (int i = 0; i < transform.childCount; i++)
+			{
+				transform.GetChild(i).position = ProjectOnTerrain(transform.GetChild(i).position);  // Aligning Y coordinate of NavigationArea Point to lay on terrain collider
+			}
+		}
+
+		/// <summary>
+		/// Updating navigation area - lines segmentation and generating area triangles.
+		/// </summary>
+		private void UpdateArea()
 		{
 			areaPoints.Clear();
-			//segmentedAreaPoints.Clear();
 
 			for (int i = 0; i < transform.childCount; i++)
 			{
-				transform.GetChild(i).position = ProjectOnTerrain(transform.GetChild(i).position); // Aligning Y coordinate of NavigationArea Point to lay on terrain collider
 				areaPoints.Add(transform.GetChild(i).localPosition);
 			}
 
-			if (areaPointsTriangles == null || areaPointsTriangles.Length != (3 * (areaPoints.Count - 2)))
-			{
-				areaPointsTriangles = GenerateTriangles(areaPoints);
-				areaMesh.Clear();
-			}
-
-			areaMesh.SetVertices(areaPoints);
-			areaMesh.SetTriangles(areaPointsTriangles, 0);
-			areaMesh.RecalculateBounds();
-			areaCollider.sharedMesh = areaMesh;
+			GenerateAreaTriangles(areaPoints);
+			SegmentArea(areaPoints);
 		}
 
-		//private void UpdateArea()
-		//{
-		//	areaPoints.Clear();
-		//	segmentedAreaPoints.Clear();
-
-		//	for (int i = 0; i < transform.childCount; i++)
-		//	{
-		//		transform.GetChild(i).position = ProjectOnTerrain(transform.GetChild(i).position); // Aligning Y coordinate of NavigationArea Point to lay on terrain collider
-		//		areaPoints.Add(transform.GetChild(i).localPosition);
-
-		//		var p1 = transform.GetChild(i).position;
-		//		var p2 = i == transform.childCount - 1 ? transform.GetChild(0).position : transform.GetChild(i + 1).position;
-
-		//		var path = p2 - p1;
-		//		var dist = path.magnitude;
-		//		var dir = path.normalized;
-
-		//		for (float step = 0.0f; step < dist; step += SegmentedLineStep)
-		//		{
-		//			var p = p1 + dir * step;
-		//			var segmentedPoint = ProjectOnTerrain(p);
-		//			segmentedAreaPoints.Add(segmentedPoint);
-		//		}
-		//	}
-
-		//	GenerateAreaTriangles(areaPoints);
-		//}
-
-		private void SegmentArea()
+		private void SegmentArea(List<Vector3> areaPoints)
 		{
 			if (segmentedAreaPoints == null || segmentedAreaPoints.Length != areaPoints.Count)
 				segmentedAreaPoints = new List<Vector3>[areaPoints.Count];
 
 			for (int i = 0; i < areaPoints.Count; i++)
 			{
-				var p1 = areaPoints[i];
-				var p2 = i == areaPoints.Count - 1 ? areaPoints[0] : areaPoints[i + 1];
+				var p1 = areaPoints[i]; // Area space
+				var p2 = i == areaPoints.Count - 1 ? areaPoints[0] : areaPoints[i + 1]; // Area space
 
 				var path = p2 - p1;
 				var dist = path.magnitude;
@@ -275,87 +243,63 @@ namespace NavigationArea
 				for (float step = 0.0f; step < dist; step += SegmentedLineStep)
 				{
 					var p = p1 + dir * step;
-					var segmentedPoint = ProjectOnTerrain(p);
-					segmentedAreaPoints[i].Add(segmentedPoint);
+					var segmentedPoint = ProjectOnTerrain(transform.TransformPoint(p)); // World space
+					segmentedAreaPoints[i].Add(transform.InverseTransformPoint(segmentedPoint));
+
+					/*GameObject obj = new GameObject();
+					obj.transform.SetParent(test);
+					obj.transform.position = segmentedPoint;
+					obj.transform.rotation = Quaternion.identity;*/
 				}
 			}
 		}
 
 		// Using collider calculated in UpdateArea function to recreate terrain mesh but only in NavigationArea,
-		// then this mesh is used for baking of NavMesh
-		private void GenerateProjectedArea()
+		// then this mesh is used for NavMesh baking
+		private async void GenerateProjectedArea()
 		{
-			projectedAreaVertices.Clear();
-			projectedAreaTriangles.Clear();
+			isUpdating = true;
 
-			bool[] verticesTransformed = new bool[terrainVertices.Length];
-			for (int i = 0; i < terrainTriangles.Length; i += 3)
+			var terrainLocalToWorld = terrainMesh.transform.localToWorldMatrix;
+			var areaWorldToLocal = transform.worldToLocalMatrix;
+
+			await Task.Run(() =>
 			{
-				var index1 = terrainTriangles[i];
-				var index2 = terrainTriangles[i + 1];
-				var index3 = terrainTriangles[i + 2];
+				projectedAreaVertices.Clear();
+				projectedAreaTriangles.Clear();
 
-				var terrainVertex1 = terrainMesh.transform.TransformPoint(terrainVertices[index1]);
-				var terrainVertex2 = terrainMesh.transform.TransformPoint(terrainVertices[index2]);
-				var terrainVertex3 = terrainMesh.transform.TransformPoint(terrainVertices[index3]);
-
-				bool addTriangle = false;
-
-				if (IsVertexInArea(terrainVertex1))
+				for (int i = 0; i < projectedVerticesTransformed.Length; i++)
 				{
-					if (!verticesTransformed[index1])
+					projectedVerticesTransformed[i] = false;
+				}
+
+				for (int i = 0; i < terrainTriangles.Length; i += 3)
+				{
+					var index1 = terrainTriangles[i];
+					var index2 = terrainTriangles[i + 1];
+					var index3 = terrainTriangles[i + 2];
+
+					var terrainVertex1 = areaWorldToLocal.MultiplyPoint(terrainLocalToWorld.MultiplyPoint(terrainVertices[index1])); // Area space
+					var terrainVertex2 = areaWorldToLocal.MultiplyPoint(terrainLocalToWorld.MultiplyPoint(terrainVertices[index2])); // Area space
+					var terrainVertex3 = areaWorldToLocal.MultiplyPoint(terrainLocalToWorld.MultiplyPoint(terrainVertices[index3])); // Area space
+
+					bool addTriangle = false;
+
+					CalculateProjectedAreaVertex(terrainVertex1, index1, ref addTriangle);
+					CalculateProjectedAreaVertex(terrainVertex2, index2, ref addTriangle);
+					CalculateProjectedAreaVertex(terrainVertex3, index3, ref addTriangle);
+
+					if (addTriangle)
 					{
-						projectedAreaVertices.Add(transform.InverseTransformPoint(terrainVertex1));
-						verticesTransformed[index1] = true;
+						projectedAreaTriangles.Add(index1);
+						projectedAreaTriangles.Add(index2);
+						projectedAreaTriangles.Add(index3);
 					}
-					addTriangle = true;
 				}
-				else if (!verticesTransformed[index1])
-				{
-					var closestAreaPoint = GetClosestAreaPoint(terrainVertex1);
-					projectedAreaVertices.Add(transform.InverseTransformPoint(closestAreaPoint));
-					verticesTransformed[index1] = true;
-				}
+			});
 
-				if (IsVertexInArea(terrainVertex2))
-				{
-					if (!verticesTransformed[index2])
-					{
-						projectedAreaVertices.Add(transform.InverseTransformPoint(terrainVertex2));
-						verticesTransformed[index2] = true;
-					}
-					addTriangle = true;
-				}
-				else if (!verticesTransformed[index2])
-				{
-					var closestAreaPoint = GetClosestAreaPoint(terrainVertex2);
-					projectedAreaVertices.Add(transform.InverseTransformPoint(closestAreaPoint));
-					verticesTransformed[index2] = true;
-				}
-
-				if (IsVertexInArea(terrainVertex3))
-				{
-					if (!verticesTransformed[index3])
-					{
-						projectedAreaVertices.Add(transform.InverseTransformPoint(terrainVertex3));
-						verticesTransformed[index3] = true;
-					}
-					addTriangle = true;
-				}
-				else if (!verticesTransformed[index3])
-				{
-					var closestAreaPoint = GetClosestAreaPoint(terrainVertex3);
-					projectedAreaVertices.Add(transform.InverseTransformPoint(closestAreaPoint));
-					verticesTransformed[index3] = true;
-				}
-
-				if (addTriangle)
-				{
-					projectedAreaTriangles.Add(index1);
-					projectedAreaTriangles.Add(index2);
-					projectedAreaTriangles.Add(index3);
-				}
-			}
+			if (isDestroyed)
+				return;
 
 			projectedAreaMesh.Clear(); // Prevents error in console when new terrain mesh is assigned 
 			projectedAreaMesh.SetVertices(projectedAreaVertices);
@@ -363,270 +307,200 @@ namespace NavigationArea
 
 			projectedAreaMesh.RecalculateBounds();
 			projectedArea.sharedMesh = projectedAreaMesh;
+
+			isUpdating = false;
+
+			if (pendingCalculation)
+			{
+				pendingCalculation = false;
+				CalculateArea(false);
+			}
 		}
 
-		//private async void UpdateProjectedArea()
-		//{
-		//	Matrix4x4 terrainLocalToWorld = terrainMesh.transform.localToWorldMatrix;
-		//	Matrix4x4 transformWorldToLocal = transform.worldToLocalMatrix;
-
-		//	isUpdating = true;
-
-		//	await Task.Run(() =>
-		//	{
-		//		projectedAreaVertices.Clear();
-		//		projectedAreaTriangles.Clear();
-
-		//		bool[] verticesTransformed = new bool[terrainVertices.Length];
-		//		for (int i = 0; i < terrainTriangles.Length; i += 3)
-		//		{
-		//			var index1 = terrainTriangles[i];
-		//			var index2 = terrainTriangles[i + 1];
-		//			var index3 = terrainTriangles[i + 2];
-
-		//			var terrainVertex1 = terrainLocalToWorld.MultiplyPoint(terrainVertices[index1]);
-		//			var terrainVertex2 = terrainLocalToWorld.MultiplyPoint(terrainVertices[index2]);
-		//			var terrainVertex3 = terrainLocalToWorld.MultiplyPoint(terrainVertices[index3]);
-
-		//			bool addTriangle = false;
-
-		//			if (IsVertexInTriangle(terrainVertex1))
-		//			{
-		//				if (!verticesTransformed[index1])
-		//				{
-		//					projectedAreaVertices.Add(transformWorldToLocal.MultiplyPoint(terrainVertex1));
-		//					verticesTransformed[index1] = true;
-		//				}
-		//				addTriangle = true;
-
-		//				count++;
-		//			}
-		//			else if (!verticesTransformed[index1])
-		//			{
-		//				var closestAreaPoint = GetClosestAreaPoint(terrainVertex1);
-		//				projectedAreaVertices.Add(transformWorldToLocal.MultiplyPoint(closestAreaPoint));
-		//				verticesTransformed[index1] = true;
-		//			}
-
-		//			if (IsVertexInTriangle(terrainVertex2))
-		//			{
-		//				if (!verticesTransformed[index2])
-		//				{
-		//					projectedAreaVertices.Add(transformWorldToLocal.MultiplyPoint(terrainVertex2));
-		//					verticesTransformed[index2] = true;
-		//				}
-		//				addTriangle = true;
-
-		//				count++;
-		//			}
-		//			else if (!verticesTransformed[index2])
-		//			{
-		//				var closestAreaPoint = GetClosestAreaPoint(terrainVertex2);
-		//				projectedAreaVertices.Add(transformWorldToLocal.MultiplyPoint(closestAreaPoint));
-		//				verticesTransformed[index2] = true;
-		//			}
-
-		//			if (IsVertexInTriangle(terrainVertex3))
-		//			{
-		//				if (!verticesTransformed[index3])
-		//				{
-		//					projectedAreaVertices.Add(transformWorldToLocal.MultiplyPoint(terrainVertex3));
-		//					verticesTransformed[index3] = true;
-		//				}
-		//				addTriangle = true;
-
-		//				count++;
-		//			}
-		//			else if (!verticesTransformed[index3])
-		//			{
-		//				var closestAreaPoint = GetClosestAreaPoint(terrainVertex3);
-		//				projectedAreaVertices.Add(transformWorldToLocal.MultiplyPoint(closestAreaPoint));
-		//				verticesTransformed[index3] = true;
-		//			}
-
-		//			if (addTriangle)
-		//			{
-		//				projectedAreaTriangles.Add(index1);
-		//				projectedAreaTriangles.Add(index2);
-		//				projectedAreaTriangles.Add(index3);
-		//			}
-		//		}
-		//	});
-
-		//	projectedAreaMesh.Clear(); // Prevents error in console when new terrain mesh is assigned 
-		//	projectedAreaMesh.SetVertices(projectedAreaVertices);
-		//	projectedAreaMesh.SetTriangles(projectedAreaTriangles, 0);
-
-		//	projectedAreaMesh.RecalculateBounds();
-		//	projectedArea.sharedMesh = projectedAreaMesh;
-
-		//	isUpdating = false;
-		//}
-
-		private Vector3 GetClosestAreaPoint(Vector3 vertexPos)
+		private void CalculateProjectedAreaVertex(Vector3 terrainVertexAreaSpace, int index, ref bool addTriangle)
 		{
-			var closestSqrDistance = float.MaxValue;
+			if (IsVertexInArea(terrainVertexAreaSpace))
+			{
+				if (!projectedVerticesTransformed[index])
+				{
+					projectedAreaVertices.Add(terrainVertexAreaSpace);
+					projectedVerticesTransformed[index] = true;
+				}
+				addTriangle = true;
+			}
+			else if (!projectedVerticesTransformed[index])
+			{
+				var closestAreaPoint = GetClosestAreaPoint(terrainVertexAreaSpace);
+				projectedAreaVertices.Add(closestAreaPoint);
+				projectedVerticesTransformed[index] = true;
+			}
+		}
+
+		private Vector3 GetClosestAreaPoint(Vector3 terrainVertexAreaSpace)
+		{
+			var closestAreaPointSqrDist = float.MaxValue;
 			var closestAreaPointIndex = 0;
 			for (int i = 0; i < areaPoints.Count; i++)
 			{
-				var sqrDist = (areaPoints[i] - vertexPos).sqrMagnitude;
-				if (sqrDist < closestSqrDistance)
+				var sqrDist = (areaPoints[i] - terrainVertexAreaSpace).sqrMagnitude;
+				if (sqrDist < closestAreaPointSqrDist)
 				{
-					closestSqrDistance = sqrDist;
+					closestAreaPointSqrDist = sqrDist;
 					closestAreaPointIndex = i;
 				}
 			}
 
-			closestSqrDistance = float.MaxValue;
-			var closestAreaPoint = Vector3.zero;
+			var closestSegmentedPointSqrDist = float.MaxValue;
+			var closestSegmentedPoint = Vector3.zero;
 			foreach (var point in segmentedAreaPoints[closestAreaPointIndex])
 			{
-				var sqrDist = (point - vertexPos).sqrMagnitude;
-				if (sqrDist < closestSqrDistance)
+				var sqrDist = (point - terrainVertexAreaSpace).sqrMagnitude;
+				if (sqrDist < closestSegmentedPointSqrDist)
 				{
-					closestSqrDistance = sqrDist;
-					closestAreaPoint = point;
+					closestSegmentedPointSqrDist = sqrDist;
+					closestSegmentedPoint = point;
 				}
 			}
 
 			var previousIndex = closestAreaPointIndex == 0 ? areaPoints.Count - 1 : closestAreaPointIndex - 1;
 			foreach (var point in segmentedAreaPoints[previousIndex])
 			{
-				var sqrDist = (point - vertexPos).sqrMagnitude;
-				if (sqrDist < closestSqrDistance)
+				var sqrDist = (point - terrainVertexAreaSpace).sqrMagnitude;
+				if (sqrDist < closestSegmentedPointSqrDist)
 				{
-					closestSqrDistance = sqrDist;
-					closestAreaPoint = point;
+					closestSegmentedPointSqrDist = sqrDist;
+					closestSegmentedPoint = point;
 				}
 			}
 
-			//var closestSqrDistance = float.MaxValue;
-			//var closestAreaPoint = Vector3.zero;
-			//foreach (var point in segmentedAreaPoints)
-			//{
-			//	var sqrDist = (vertexPos - point).sqrMagnitude;
-			//	if (closestSqrDistance > sqrDist)
-			//	{
-			//		closestSqrDistance = sqrDist;
-			//		closestAreaPoint = point;
-			//	}
-			//}
-			return closestAreaPoint;
+			var nextIndex = ++closestAreaPointIndex % areaPoints.Count;
+			foreach (var point in segmentedAreaPoints[nextIndex])
+			{
+				var sqrDist = (point - terrainVertexAreaSpace).sqrMagnitude;
+				if (sqrDist < closestSegmentedPointSqrDist)
+				{
+					closestSegmentedPointSqrDist = sqrDist;
+					closestSegmentedPoint = point;
+				}
+			}
+
+			return closestSegmentedPoint;
 		}
 
-		// Generating triangles for supplied vertices
-		private int[] GenerateTriangles(List<Vector3> vertices)
+		/// <summary>
+		/// Area is recreated to triangles so each terrain vertex can be tested against them to know if is in area or not.
+		/// </summary>
+		/// <param name="vertices">Vertices for which triangles are created.</param>
+		private void GenerateAreaTriangles(List<Vector3> vertices)
 		{
-			var indices = new int[3 * (vertices.Count - 2)];
+			var indicesCount = 3 * (vertices.Count - 2);
 
 			// All triangles start from first vertex
 			int v1 = 0;
 			int v2 = 2;
 			int v3 = 1;
 
-			for (int i = 0; i < indices.Length; i += 3)
+			areaTriangles.Clear();
+			for (int i = 0; i < indicesCount; i += 3)
 			{
-				indices[i] = v1;
-				indices[i + 1] = v2++;
-				indices[i + 2] = v3++;
+				areaTriangles.Add(vertices[v1]);
+				areaTriangles.Add(vertices[v2++]);
+				areaTriangles.Add(vertices[v3++]);
 			}
-
-			return indices;
 		}
 
-		//private void GenerateAreaTriangles(List<Vector3> vertices)
-		//{
-		//	var indicesCount = 3 * (vertices.Count - 2);
+		private bool IsVertexInArea(Vector3 point)
+		{
+			for (int j = 0; j < areaTriangles.Count; j += 3)
+			{
+				if (IsVertexInArea(areaTriangles[j], areaTriangles[j + 1], areaTriangles[j + 2], point))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
 
-		//	 All triangles start from first vertex
+		private bool IsVertexInArea(Vector3 posA, Vector3 posB, Vector3 posC, Vector3 point)
+		{
+			posA.y = posB.y = posC.y = point.y = 0;
+			/*if (IsOnSameSide(posA, posB, posC, point) && IsOnSameSide(posB, posC, posA, point) && IsOnSameSide(posC, posA, posB, point))
+			{
+				return true;
+			}
+			return false;*/
+
+			// Compute vectors
+			var v0 = posC - posA;
+			var v1 = posB - posA;
+			var v2 = point - posA;
+
+			// Compute dot products
+			var dot00 = Vector3.Dot(v0, v0);
+			var dot01 = Vector3.Dot(v0, v1);
+			var dot02 = Vector3.Dot(v0, v2);
+			var dot11 = Vector3.Dot(v1, v1);
+			var dot12 = Vector3.Dot(v1, v2);
+
+			// Compute barycentric coordinates
+			var invDenom = 1.0f / (dot00 * dot11 - dot01 * dot01);
+			var u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+			var v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+			// Check if point is in triangle
+			return (u >= 0.0f) && (v >= 0.0f) && (u + v < 1.0f);
+		}
+
+		private bool IsOnSameSide(Vector3 pos1, Vector3 pos2, Vector3 pos3, Vector3 point)
+		{
+			var a = Vector3.Cross(pos2 - pos1, point - pos1);
+			var b = Vector3.Cross(pos2 - pos1, pos3 - pos1);
+			if (Vector3.Dot(a, b) >= 0)
+				return true;
+			else
+				return false;
+		}
+
+		// NavigationArea is operating on XZ plane, so this method
+		// projects any point on terrain collider (on correct Y coordinate)
+		private Vector3 ProjectOnTerrain(Vector3 worldPos)
+		{
+			var highestPoint = worldPos;
+			highestPoint.y = terrainCollider.bounds.max.y;
+			var ray = new Ray(highestPoint + Vector3.up, Vector3.down);
+
+			if (terrainCollider.Raycast(ray, out RaycastHit hitInfo, Mathf.Infinity))
+				return hitInfo.point;
+			else
+				return worldPos;
+		}
+
+		//// Generating triangles for supplied vertices
+		//private int[] GenerateTriangles(List<Vector3> vertices)
+		//{
+		//	var indices = new int[3 * (vertices.Count - 2)];
+
+		//	// All triangles start from first vertex
 		//	int v1 = 0;
 		//	int v2 = 2;
 		//	int v3 = 1;
 
-		//	areaTriangles.Clear();
-		//	for (int i = 0; i < indicesCount; i += 3)
+		//	for (int i = 0; i < indices.Length; i += 3)
 		//	{
-		//		areaTriangles.Add(transform.TransformPoint(vertices[v1]));
-		//		areaTriangles.Add(transform.TransformPoint(vertices[v2++]));
-		//		areaTriangles.Add(transform.TransformPoint(vertices[v3++]));
+		//		indices[i] = v1;
+		//		indices[i + 1] = v2++;
+		//		indices[i + 2] = v3++;
 		//	}
+
+		//	return indices;
 		//}
 
-		//private bool IsVertexInTriangle(Vector3 point)
+		//// Method which checks if vertex lays in navigation area collider (ignoring Y coordinate)
+		//private bool IsVertexInAreaTest(Vector3 pos)
 		//{
-		//	for (int j = 0; j < areaTriangles.Count; j += 3)
-		//	{
-		//		if (IsVertexInTriangle(areaTriangles[j], areaTriangles[j + 1], areaTriangles[j + 2], point))
-		//		{
-		//			return true;
-		//		}
-		//	}
-		//	return false;
+		//	pos.y = areaCollider.bounds.max.y;
+		//	var ray = new Ray(pos + Vector3.up, Vector3.down);
+		//	return areaCollider.Raycast(ray, out _, Mathf.Infinity);
 		//}
-
-		//private bool IsVertexInTriangle(Vector3 posA, Vector3 posB, Vector3 posC, Vector3 point)
-		//{
-		//	/*if (IsOnSameSide(posA, posB, posC, point) && IsOnSameSide(posB, posC, posA, point) && IsOnSameSide(posC, posA, posB, point))
-		//	{
-		//		return true;
-		//	}
-		//	return false;*/
-
-		//	 Compute vectors
-		//	var v0 = posC - posA;
-		//	var v1 = posB - posA;
-		//	var v2 = point - posA;
-
-		//	 Compute dot products
-		//	var dot00 = Vector3.Dot(v0, v0);
-		//	var dot01 = Vector3.Dot(v0, v1);
-		//	var dot02 = Vector3.Dot(v0, v2);
-		//	var dot11 = Vector3.Dot(v1, v1);
-		//	var dot12 = Vector3.Dot(v1, v2);
-
-		//	 Compute barycentric coordinates
-		//	var invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
-		//	var u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-		//	var v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-
-		//	 Check if point is in triangle
-		//	return (u >= 0) && (v >= 0) && (u + v < 1);
-		//}
-
-		//private bool IsOnSameSide(Vector3 pos1, Vector3 pos2, Vector3 pos3, Vector3 point)
-		//{
-		//	var a = Vector3.Cross(pos2 - pos1, point - pos1);
-		//	var b = Vector3.Cross(pos2 - pos1, pos3 - pos1);
-		//	if (Vector3.Dot(a, b) >= 0)
-		//		return true;
-		//	else
-		//		return false;
-		//}
-
-		// NavigationArea is operating on XZ plane, so this method
-		// projects any point on terrain collider (on correct Y coordinate)
-		private Vector3 ProjectOnTerrain(Vector3 pos)
-		{
-			var highestPoint = pos;
-			highestPoint.y = terrainCollider.bounds.max.y;
-
-			var ray = new Ray(highestPoint + Vector3.up, Vector3.down);
-			if (terrainCollider.Raycast(ray, out RaycastHit hitInfo, Mathf.Infinity))
-				return hitInfo.point;
-			else
-				return pos;
-		}
-
-		// Method which checks if vertex lays in navigation area collider (ignoring Y coordinate)
-		private bool IsVertexInArea(Vector3 pos)
-		{
-			var p1 = (areaPoints[1] - areaPoints[0]).normalized;
-			var p2 = (areaPoints[areaPoints.Count - 1] - areaPoints[0]).normalized;
-			var normal = Vector3.Cross(p2, p1).normalized;
-
-			pos.y = areaCollider.bounds.max.y;
-			var ray = new Ray(pos + Vector3.up, Vector3.down);
-			return areaCollider.Raycast(ray, out _, Mathf.Infinity);
-		}
 	}
 }
