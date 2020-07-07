@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -23,7 +24,8 @@ namespace NavigationArea
 		}
 
 		[Space(20)]
-		[SerializeField] private ShowGizmos showGizmos = ShowGizmos.Always;
+		[SerializeField] private ShowGizmos showInEditMode = ShowGizmos.Always;
+		[SerializeField] private ShowGizmos showInPlayMode = ShowGizmos.WhenSelected;
 		[SerializeField] private bool autoCalculation = true; // If true, navigation area is calculated automatically each update (not apply to play mode)
 
 		[Space(20)]
@@ -38,6 +40,15 @@ namespace NavigationArea
 
 #if NAV_MESH_SURFACE
 		private NavMeshSurface navMeshSurface;
+		private NavMeshSurface NavMeshSurface
+		{
+			get
+			{
+				if (!navMeshSurface)
+					navMeshSurface = GetComponentInParent<NavMeshSurface>();
+				return navMeshSurface;
+			}
+		}
 #endif
 
 		private bool canUpdate = false;
@@ -60,27 +71,29 @@ namespace NavigationArea
 				s.SegmentedLineStep = segmentedLineStep;
 				s.AreaLineThickness = areaLineThickness;
 			}
+
+			if (autoCalculation)
+				enabled = true;
 		}
+
+#if UNITY_EDITOR
+		private void Awake()
+		{
+			navigationAreaSegmentShader = (Shader)AssetDatabase.LoadAssetAtPath(Constants.NavigationAreaSegmentShaderPath, typeof(Shader));
+			Assert.IsNotNull(navigationAreaSegmentShader, $"Shader not found at path {Constants.NavigationAreaSegmentShaderPath}");
+			segmentMaterial = new Material(navigationAreaSegmentShader);
+		}
+#endif
 
 		private void OnEnable()
 		{
 #if UNITY_EDITOR
-
-#if NAV_MESH_SURFACE
-			if (!navMeshSurface)
-				navMeshSurface = GetComponentInParent<NavMeshSurface>();
-#endif
-
-			navigationAreaSegmentShader = (Shader)AssetDatabase.LoadAssetAtPath(Constants.NavigationAreaSegmentShaderPath, typeof(Shader));
-			Assert.IsNotNull(navigationAreaSegmentShader, $"Shader not found at path {Constants.NavigationAreaSegmentShaderPath}");
-			if (!segmentMaterial)
-				segmentMaterial = new Material(navigationAreaSegmentShader);
-
 			CheckSegments();
 			foreach (var s in segments.Values)
 				s.SetAreaMaterial(segmentMaterial);
 
 			Selection.selectionChanged += OnSelectionChanged;
+			OnSelectionChanged();
 #else
 			gameObject.SetActive(false);
 #endif
@@ -91,10 +104,9 @@ namespace NavigationArea
 			if (!canUpdate)
 				return;
 
-			CheckSegments();
 			OnValidate();
 
-			if (!autoCalculation || Application.isPlaying) 
+			if (!autoCalculation)
 				return;
 
 			segmentsToRemove.Clear();
@@ -112,17 +124,18 @@ namespace NavigationArea
 			}
 		}
 
+#if UNITY_EDITOR
 		private void OnDisable()
 		{
-#if UNITY_EDITOR
-			if (segmentMaterial)
-				DestroyImmediate(segmentMaterial);
-
 			Selection.selectionChanged -= OnSelectionChanged;
-#endif
 		}
 
-#if UNITY_EDITOR
+		private void OnDestroy()
+		{
+			if (segmentMaterial)
+				DestroyImmediate(segmentMaterial);
+		}
+
 		private void OnSelectionChanged()
 		{
 			if (Selection.activeTransform != null && Selection.activeTransform.root == transform.root)
@@ -133,7 +146,10 @@ namespace NavigationArea
 			else
 			{
 				canUpdate = false;
-				RenderArea = showGizmos == ShowGizmos.Always;
+				if (Application.isPlaying)
+					RenderArea = showInPlayMode == ShowGizmos.Always;
+				else
+					RenderArea = showInEditMode == ShowGizmos.Always;
 			}
 		}
 #endif
@@ -157,7 +173,7 @@ namespace NavigationArea
 			}
 		}
 
-		public void AddAreaSegment()
+		public async void AddAreaSegment()
 		{
 			var segmentObj = new GameObject("AreaSegment");
 			segmentObj.transform.SetParent(transform);
@@ -168,12 +184,18 @@ namespace NavigationArea
 			for (int i = 0; i < 2; i++)
 				UnityEditorInternal.ComponentUtility.MoveComponentUp(segmentComp);
 
-			segmentComp.InitializePoints();
+			segmentComp.Initialize();
 			segmentComp.SetAreaMaterial(segmentMaterial);
 			segmentComp.OnValidate();
 			GameObjectUtility.SetStaticEditorFlags(segmentObj, StaticEditorFlags.NavigationStatic);
 
 			OnValidate();
+			segmentComp.CalculateArea(false);
+
+			// !!!
+			Selection.activeObject = null;
+			await Task.Delay(10);
+			Selection.activeObject = gameObject;
 		}
 
 		public void CalculateArea(bool manualInvoke)
@@ -188,21 +210,12 @@ namespace NavigationArea
 #if NAV_MESH_SURFACE
 		public void BuildNavMesh()
 		{
-			if (!navMeshSurface)
-				navMeshSurface = GetComponentInParent<NavMeshSurface>();
-
-			CalculateArea(true);
-			navMeshSurface.BuildNavMesh();
+			NavMeshSurface.BuildNavMesh();
 		}
-#endif
 
-#if NAV_MESH_SURFACE
 		public void ClearNavMesh()
 		{
-			if (!navMeshSurface)
-				navMeshSurface = GetComponentInParent<NavMeshSurface>();
-
-			navMeshSurface.RemoveData();
+			NavMeshSurface.RemoveData();
 		}
 #endif
 	}

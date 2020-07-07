@@ -14,14 +14,12 @@ namespace NavigationArea
     [RequireComponent(typeof(MeshRenderer))]
     public class NavigationAreaSegment : MonoBehaviour
     {
+#if UNITY_EDITOR
 		[Header("Terrain")]
 		[Tooltip("This is mesh on which NavMesh will be generated.")]
 		[SerializeField] private MeshFilter terrainMesh;
 		[Tooltip("This is collider of mesh on which NavMesh will be generated.")]
 		[SerializeField] private Collider terrainCollider;
-
-		private MeshFilter projectedArea;
-		private MeshRenderer areaRenderer;
 
 		private Mesh projectedAreaMesh;
 
@@ -40,6 +38,28 @@ namespace NavigationArea
 		private bool pendingCalculation = false; // Flag if there is needed final calculation after user defined navigation area
 		private bool isDestroyed = false;
 
+		private MeshFilter projectedArea;
+		private MeshFilter ProjectedArea
+		{
+			get
+			{
+				if (!projectedArea)
+					projectedArea = GetComponent<MeshFilter>();
+				return projectedArea;
+			}
+		}
+
+		private MeshRenderer areaRenderer;
+		private MeshRenderer AreaRenderer
+		{
+			get
+			{
+				if (!areaRenderer)
+					areaRenderer = GetComponent<MeshRenderer>();
+				return areaRenderer;
+			}
+		}
+
 		public bool RenderArea { get; set; }
 		public float AreaLineThickness { get; set; }
 		public float SegmentedLineStep { get; set; }
@@ -54,16 +74,9 @@ namespace NavigationArea
 			}
 		}
 
-		private void OnEnable()
+		private void Awake()
 		{
-			projectedArea = GetComponent<MeshFilter>();
-			areaRenderer = GetComponent<MeshRenderer>();
-
-			AreaRendering();
-
-#if UNITY_EDITOR
 			projectedAreaMesh = new Mesh();
-#endif
 		}
 
 		private void OnDestroy()
@@ -73,9 +86,12 @@ namespace NavigationArea
 
 		private void OnDrawGizmos()
 		{
-			AreaRendering();
+			AreaRenderer.enabled = RenderArea;
+			if (!RenderArea)
+				return;
 
-			if (transform.childCount < 3) return;
+			if (transform.childCount < 3) 
+				return;
 
 			for (int i = 0; i < transform.childCount; i++)
 			{
@@ -87,13 +103,13 @@ namespace NavigationArea
 			}
 		}
 
-		public void InitializePoints()
+		public void Initialize()
 		{
 			CreatePoint(new Vector3(0.0f, 0.0f, 5.0f));
 			CreatePoint(new Vector3(-5.0f, 0.0f, -5.0f));
 			CreatePoint(new Vector3(5.0f, 0.0f, -5.0f));
 
-			AssignClosestTerrain(); // !!!
+			AssignClosestTerrain();
 		}
 
 		public void CreatePoint()
@@ -126,7 +142,7 @@ namespace NavigationArea
 
 		public void SetAreaMaterial(Material material)
 		{
-			areaRenderer.sharedMaterial = material;
+			AreaRenderer.sharedMaterial = material;
 		}
 
 		public void CalculateArea(bool manualInvoke)
@@ -150,8 +166,6 @@ namespace NavigationArea
 				return;
 			}
 
-			areaRenderer.enabled = true;
-
 			AlignAreaPoints();
 
 			if (!isUpdating)
@@ -167,33 +181,20 @@ namespace NavigationArea
 
 		private void AssignClosestTerrain()
 		{
-			RaycastHit[] hits;
-			hits = Physics.RaycastAll(transform.position + Vector3.up * 10, Vector3.down, Mathf.Infinity);
+			var hits = Physics.RaycastAll(transform.position + transform.up * 100.0f, -transform.up, Mathf.Infinity);
 			if (hits.Length > 0)
 			{
 				var sorted = hits.OrderBy(h => (h.point - transform.position).sqrMagnitude);
 				foreach (var hit in sorted)
 				{
-					if (!hit.transform.root.Equals(transform.root) && hit.transform.GetComponent<MeshFilter>())
-					{
-						var meshFilter = hit.transform.GetComponent<MeshFilter>();
-						terrainMesh = meshFilter;
-						terrainCollider = hit.collider;
-						return;
-					}
-				}
-			}
-		}
+					var meshFilter = hit.transform.GetComponent<MeshFilter>();
+					if (!meshFilter)
+						continue;
 
-		private void AreaRendering()
-		{
-			if (Application.isPlaying)
-			{
-				areaRenderer.enabled = false;
-			}
-			else
-			{
-				areaRenderer.enabled = RenderArea;
+					terrainMesh = meshFilter;
+					terrainCollider = hit.collider;
+					return;
+				}
 			}
 		}
 
@@ -245,11 +246,6 @@ namespace NavigationArea
 					var p = p1 + dir * step;
 					var segmentedPoint = ProjectOnTerrain(transform.TransformPoint(p)); // World space
 					segmentedAreaPoints[i].Add(transform.InverseTransformPoint(segmentedPoint));
-
-					/*GameObject obj = new GameObject();
-					obj.transform.SetParent(test);
-					obj.transform.position = segmentedPoint;
-					obj.transform.rotation = Quaternion.identity;*/
 				}
 			}
 		}
@@ -306,7 +302,7 @@ namespace NavigationArea
 			projectedAreaMesh.SetTriangles(projectedAreaTriangles, 0);
 
 			projectedAreaMesh.RecalculateBounds();
-			projectedArea.sharedMesh = projectedAreaMesh;
+			ProjectedArea.sharedMesh = projectedAreaMesh;
 
 			isUpdating = false;
 
@@ -502,5 +498,6 @@ namespace NavigationArea
 		//	var ray = new Ray(pos + Vector3.up, Vector3.down);
 		//	return areaCollider.Raycast(ray, out _, Mathf.Infinity);
 		//}
+#endif
 	}
 }
