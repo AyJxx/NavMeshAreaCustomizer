@@ -1,4 +1,4 @@
-﻿Shader "NavigationArea/NavigationAreaSegment"
+﻿Shader "NavMeshAreaCustomizer/NavMeshAreaSegment"
 {
     Properties
     {

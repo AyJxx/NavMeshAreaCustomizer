@@ -2,11 +2,11 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace NavigationArea
+namespace NavMeshAreaCustomizer
 {
     public static class Constants
     {
-        public const string NavigationAreaSegmentShaderPath = "Assets/NavigationArea/Shaders/NavigationAreaSegment.shader";
+        public const string NavigationAreaSegmentShaderPath = "Assets/NavMeshAreaCustomizer/Shaders/NavMeshAreaSegment.shader";
 
         public const string AddSegmentText = "Add Segment";
         public const string CalculateAreaText = "Calculate Area";

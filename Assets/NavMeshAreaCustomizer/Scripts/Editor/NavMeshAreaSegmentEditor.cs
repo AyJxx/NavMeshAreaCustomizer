@@ -3,17 +3,17 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace NavigationArea
+namespace NavMeshAreaCustomizer
 {
-    [CustomEditor(typeof(NavigationAreaSegment))]
-    public class NavigationAreaSegmentEditor : Editor
+    [CustomEditor(typeof(NavMeshAreaSegment))]
+    public class NavMeshAreaSegmentEditor : Editor
     {
 		public override void OnInspectorGUI()
 		{
 			DrawDefaultInspector();
 
 			if (GUILayout.Button(Constants.AddPointText))
-				((NavigationAreaSegment)target).CreatePoint();
+				((NavMeshAreaSegment)target).CreatePoint();
 		}
 	}
 }

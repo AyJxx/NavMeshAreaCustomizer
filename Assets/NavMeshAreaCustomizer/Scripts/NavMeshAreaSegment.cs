@@ -7,12 +7,12 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
-namespace NavigationArea
+namespace NavMeshAreaCustomizer
 {
     [ExecuteInEditMode]
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
-    public class NavigationAreaSegment : MonoBehaviour
+    public class NavMeshAreaSegment : MonoBehaviour
     {
 #if UNITY_EDITOR
 		[Header("Terrain")]
@@ -37,6 +37,8 @@ namespace NavigationArea
 		private bool isUpdating = false; // Flag is secondary thread is already calculating projected area mesh
 		private bool pendingCalculation = false; // Flag if there is needed final calculation after user defined navigation area
 		private bool isDestroyed = false;
+
+		private MeshCollider terrainMeshCollider;
 
 		private MeshFilter projectedArea;
 		private MeshFilter ProjectedArea
@@ -72,6 +74,9 @@ namespace NavigationArea
 				terrainTriangles = terrainMesh.sharedMesh.triangles;
 				projectedVerticesTransformed = new bool[terrainVertices.Length];
 			}
+
+			if (terrainCollider)
+				terrainMeshCollider = terrainCollider.GetComponent<MeshCollider>();
 		}
 
 		private void Awake()
@@ -166,6 +171,10 @@ namespace NavigationArea
 				return;
 			}
 
+			bool isConvex = false;
+			if (terrainMeshCollider)
+				isConvex = terrainMeshCollider.convex;
+
 			AlignAreaPoints();
 
 			if (!isUpdating)
@@ -177,6 +186,9 @@ namespace NavigationArea
 			{
 				pendingCalculation = true;
 			}
+
+			if (terrainMeshCollider)
+				terrainMeshCollider.convex = isConvex;
 		}
 
 		private void AssignClosestTerrain()

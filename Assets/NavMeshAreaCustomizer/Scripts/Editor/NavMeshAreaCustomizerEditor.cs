@@ -3,27 +3,27 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace NavigationArea
+namespace NavMeshAreaCustomizer
 {
-    [CustomEditor(typeof(NavigationAreaCustomizer))]
-    public class NavigationAreaCustomizerEditor : Editor
+    [CustomEditor(typeof(NavMeshAreaCustomizer))]
+    public class NavMeshAreaCustomizerEditor : Editor
     {
         public override void OnInspectorGUI()
         {
             DrawDefaultInspector();
 
             if (GUILayout.Button(Constants.AddSegmentText))
-                ((NavigationAreaCustomizer)target).AddAreaSegment();
+                ((NavMeshAreaCustomizer)target).AddAreaSegment();
 
             if (GUILayout.Button(Constants.CalculateAreaText))
-                ((NavigationAreaCustomizer)target).CalculateArea(true);
+                ((NavMeshAreaCustomizer)target).CalculateArea(true);
 
 #if NAV_MESH_SURFACE
             if (GUILayout.Button(Constants.BuildText))
-                ((NavigationAreaCustomizer)target).BuildNavMesh();
+                ((NavMeshAreaCustomizer)target).BuildNavMesh();
             
             if (GUILayout.Button(Constants.ClearText))
-                ((NavigationAreaCustomizer)target).ClearNavMesh();
+                ((NavMeshAreaCustomizer)target).ClearNavMesh();
 #endif
         }
     }

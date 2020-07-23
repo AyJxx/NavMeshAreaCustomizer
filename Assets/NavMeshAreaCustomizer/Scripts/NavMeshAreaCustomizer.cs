@@ -9,14 +9,14 @@ using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Assertions;
 
-namespace NavigationArea
+namespace NavMeshAreaCustomizer
 {
 	/// <summary>
 	/// Simply put, this tool recreates specified terrain mesh in defined navigation area and then is possible to bake NavMesh in this area,
 	/// so it means much more control for designer
 	/// </summary>
 	[ExecuteInEditMode]
-	public class NavigationAreaCustomizer : MonoBehaviour
+	public class NavMeshAreaCustomizer : MonoBehaviour
 	{
 		public enum ShowGizmos
 		{
@@ -32,7 +32,7 @@ namespace NavigationArea
 		[SerializeField] [Range(0.1f, 10.0f)] private float segmentedLineStep = 0.25f;
 		[SerializeField] [Range(1.0f, 10.0f)] private float areaLineThickness = 5.0f;
 
-		private readonly Dictionary<Transform, NavigationAreaSegment> segments = new Dictionary<Transform, NavigationAreaSegment>();
+		private readonly Dictionary<Transform, NavMeshAreaSegment> segments = new Dictionary<Transform, NavMeshAreaSegment>();
 		private readonly List<Transform> segmentsToRemove = new List<Transform>();
 
 		private Shader navigationAreaSegmentShader;
@@ -160,14 +160,14 @@ namespace NavigationArea
 			{
 				if (!segments.ContainsKey(child))
 				{
-					var segment = child.GetComponent<NavigationAreaSegment>();
+					var segment = child.GetComponent<NavMeshAreaSegment>();
 					if (segment)
 					{
 						segments.Add(child, segment);
 					}
 					else
 					{
-						Debug.LogWarning($"Child object {segment.name} doesn't contain {nameof(NavigationAreaSegment)} component!");
+						Debug.LogWarning($"Child object {segment.name} doesn't contain {nameof(NavMeshAreaSegment)} component!");
 					}
 				}
 			}
@@ -180,7 +180,7 @@ namespace NavigationArea
 			segmentObj.transform.localPosition = Vector3.zero;
 			segmentObj.transform.localRotation = Quaternion.identity;
 
-			var segmentComp = (NavigationAreaSegment)segmentObj.AddComponent(typeof(NavigationAreaSegment));
+			var segmentComp = (NavMeshAreaSegment)segmentObj.AddComponent(typeof(NavMeshAreaSegment));
 			for (int i = 0; i < 2; i++)
 				UnityEditorInternal.ComponentUtility.MoveComponentUp(segmentComp);
 

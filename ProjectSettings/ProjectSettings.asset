@@ -668,10 +668,10 @@ PlayerSettings:
     m_VersionCode: 1
     m_VersionName: 
   apiCompatibilityLevel: 6
-  cloudProjectId: 
+  cloudProjectId: 896a7cc9-7dc7-4dcc-a2fb-12023f0eb767
   framebufferDepthMemorylessMode: 0
-  projectName: 
-  organizationId: 
+  projectName: NavMesh Area Customizer
+  organizationId: adam-j-va-as-publisher
   cloudEnabled: 0
   enableNativePlatformBackendsForNewInputSystem: 0
   disableOldInputManagerSupport: 0
