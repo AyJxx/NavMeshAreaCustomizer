@@ -12,8 +12,7 @@ using UnityEngine.Assertions;
 namespace NavMeshAreaCustomizer
 {
 	/// <summary>
-	/// Simply put, this tool recreates specified terrain mesh in defined navigation area and then is possible to bake NavMesh in this area,
-	/// so it means much more control for designer
+	/// This tool recreates specified terrain mesh in defined navigation area and then is possible to bake NavMesh in this area.
 	/// </summary>
 	[ExecuteInEditMode]
 	public class NavMeshAreaCustomizer : MonoBehaviour
@@ -22,13 +21,14 @@ namespace NavMeshAreaCustomizer
 		{
 			Always, WhenSelected
 		}
-
+#if UNITY_EDITOR
 		[Space(20)]
 		[SerializeField] private ShowGizmos showInEditMode = ShowGizmos.Always;
 		[SerializeField] private ShowGizmos showInPlayMode = ShowGizmos.WhenSelected;
 		[SerializeField] private bool autoCalculation = true; // If true, navigation area is calculated automatically each update (not apply to play mode)
 
 		[Space(20)]
+		[Tooltip("Lower number means higher precision for triangles near area lines.")]
 		[SerializeField] [Range(0.1f, 10.0f)] private float segmentedLineStep = 0.25f;
 		[SerializeField] [Range(1.0f, 10.0f)] private float areaLineThickness = 5.0f;
 
@@ -75,28 +75,28 @@ namespace NavMeshAreaCustomizer
 			if (autoCalculation)
 				enabled = true;
 		}
+#endif
 
-#if UNITY_EDITOR
 		private void Awake()
 		{
+#if UNITY_EDITOR
 			navigationAreaSegmentShader = (Shader)AssetDatabase.LoadAssetAtPath(Constants.NavigationAreaSegmentShaderPath, typeof(Shader));
 			Assert.IsNotNull(navigationAreaSegmentShader, $"Shader not found at path {Constants.NavigationAreaSegmentShaderPath}");
 			segmentMaterial = new Material(navigationAreaSegmentShader);
-		}
+#else
+			gameObject.SetActive(false);
 #endif
+		}
 
+#if UNITY_EDITOR
 		private void OnEnable()
 		{
-#if UNITY_EDITOR
 			CheckSegments();
 			foreach (var s in segments.Values)
 				s.SetAreaMaterial(segmentMaterial);
 
 			Selection.selectionChanged += OnSelectionChanged;
 			OnSelectionChanged();
-#else
-			gameObject.SetActive(false);
-#endif
 		}
 
 		private void Update()
@@ -124,7 +124,6 @@ namespace NavMeshAreaCustomizer
 			}
 		}
 
-#if UNITY_EDITOR
 		private void OnDisable()
 		{
 			Selection.selectionChanged -= OnSelectionChanged;
@@ -152,7 +151,6 @@ namespace NavMeshAreaCustomizer
 					RenderArea = showInEditMode == ShowGizmos.Always;
 			}
 		}
-#endif
 
 		private void CheckSegments()
 		{
@@ -192,7 +190,7 @@ namespace NavMeshAreaCustomizer
 			OnValidate();
 			segmentComp.CalculateArea(false);
 
-			// !!!
+			// Little hack to not loose focus on NavMeshAreaCustomizer game object
 			Selection.activeObject = null;
 			await Task.Delay(10);
 			Selection.activeObject = gameObject;
@@ -217,6 +215,7 @@ namespace NavMeshAreaCustomizer
 		{
 			NavMeshSurface.RemoveData();
 		}
+#endif
 #endif
 	}
 }

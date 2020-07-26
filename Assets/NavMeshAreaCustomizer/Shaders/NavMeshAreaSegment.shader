@@ -2,7 +2,7 @@
 {
     Properties
     {
-        _Color("Color", Color) = (1, 0, 0, 0.2)
+        _Color("Color", Color) = (1, 0, 0, 0.35)
     }
     SubShader
     {

@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace NavMeshAreaCustomizer
 {
@@ -22,23 +23,22 @@ namespace NavMeshAreaCustomizer
 		[SerializeField] private Collider terrainCollider;
 
 		private Mesh projectedAreaMesh;
+		private MeshCollider terrainMeshCollider;
 
 		private readonly List<Vector3> areaPoints = new List<Vector3>(); // Points in NavigationArea which are used to create arbitrary shape
 		private List<Vector3>[] segmentedAreaPoints; // Same as areaPoints but line from one point to another is segmented to multiple points
 		private readonly List<Vector3> areaTriangles = new List<Vector3>();
 
-		private readonly List<Vector3> projectedAreaVertices = new List<Vector3>(); // These are vertices of mesh created in NavigationArea
 		private readonly List<int> projectedAreaTriangles = new List<int>();
+		private Vector3[] projectedAreaVertices; // These are vertices of mesh created in NavigationArea
 		private bool[] projectedVerticesTransformed;
 
 		private Vector3[] terrainVertices;
 		private int[] terrainTriangles;
 
 		private bool isUpdating = false; // Flag is secondary thread is already calculating projected area mesh
-		private bool pendingCalculation = false; // Flag if there is needed final calculation after user defined navigation area
+		private bool hasPendingCalculation = false; // Flag if there is needed final calculation after user defined navigation area
 		private bool isDestroyed = false;
-
-		private MeshCollider terrainMeshCollider;
 
 		private MeshFilter projectedArea;
 		private MeshFilter ProjectedArea
@@ -65,23 +65,24 @@ namespace NavMeshAreaCustomizer
 		public bool RenderArea { get; set; }
 		public float AreaLineThickness { get; set; }
 		public float SegmentedLineStep { get; set; }
+
+		private event Action AreaCalculated;
 		
 		public void OnValidate()
 		{
-			if (terrainMesh)
+			if (!isUpdating)
 			{
-				terrainVertices = terrainMesh.sharedMesh.vertices;
-				terrainTriangles = terrainMesh.sharedMesh.triangles;
-				projectedVerticesTransformed = new bool[terrainVertices.Length];
+				OnTerrainChange();
+				return;
 			}
 
-			if (terrainCollider)
-				terrainMeshCollider = terrainCollider.GetComponent<MeshCollider>();
+			if (AreaCalculated == null)
+				AreaCalculated += OnTerrainChange;
 		}
 
 		private void Awake()
 		{
-			projectedAreaMesh = new Mesh();
+			projectedAreaMesh = new Mesh() { name = "ProjectedArea" };
 		}
 
 		private void OnDestroy()
@@ -108,11 +109,43 @@ namespace NavMeshAreaCustomizer
 			}
 		}
 
+		private void OnTerrainChange()
+		{
+			if (terrainMesh)
+			{
+				terrainVertices = terrainMesh.sharedMesh.vertices;
+				terrainTriangles = terrainMesh.sharedMesh.triangles;
+				projectedAreaVertices = new Vector3[terrainVertices.Length];
+				projectedVerticesTransformed = new bool[terrainVertices.Length];
+
+				// Prevention for enabled Navigation Static flag on terrain game object
+				var flags = GameObjectUtility.GetStaticEditorFlags(terrainMesh.gameObject);
+				if ((flags & StaticEditorFlags.NavigationStatic) > 0)
+				{
+					flags ^= StaticEditorFlags.NavigationStatic;
+					GameObjectUtility.SetStaticEditorFlags(terrainMesh.gameObject, flags);
+				}
+			}
+
+			if (terrainCollider)
+				terrainMeshCollider = terrainCollider.GetComponent<MeshCollider>();
+
+			AreaCalculated -= OnTerrainChange;
+		}
+
 		public void Initialize()
 		{
 			CreatePoint(new Vector3(0.0f, 0.0f, 5.0f));
 			CreatePoint(new Vector3(-5.0f, 0.0f, -5.0f));
 			CreatePoint(new Vector3(5.0f, 0.0f, -5.0f));
+
+			var meshRenderer = GetComponent<MeshRenderer>();
+			meshRenderer.lightProbeUsage = LightProbeUsage.Off;
+			meshRenderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+			meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
+			meshRenderer.receiveShadows = false;
+			meshRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+			meshRenderer.allowOcclusionWhenDynamic = false;
 
 			AssignClosestTerrain();
 		}
@@ -150,8 +183,22 @@ namespace NavMeshAreaCustomizer
 			AreaRenderer.sharedMaterial = material;
 		}
 
+		private bool CanBeUpdated()
+		{
+			if (Selection.activeTransform == null)
+				return false;
+
+			if (transform.IsChildOf(Selection.activeTransform) || Selection.activeTransform.IsChildOf(transform))
+				return true;
+
+			return false;
+		}
+
 		public void CalculateArea(bool manualInvoke)
 		{
+			if (!manualInvoke && !hasPendingCalculation && !CanBeUpdated())
+				return;
+
 			if (transform.childCount < 3)
 			{
 				if (manualInvoke)
@@ -184,16 +231,19 @@ namespace NavMeshAreaCustomizer
 			}
 			else
 			{
-				pendingCalculation = true;
+				hasPendingCalculation = true;
 			}
 
 			if (terrainMeshCollider)
 				terrainMeshCollider.convex = isConvex;
 		}
 
+		/// <summary>
+		/// This method tries to find nearest terrain mesh (collider) and assign it to the current segment.
+		/// </summary>
 		private void AssignClosestTerrain()
 		{
-			var hits = Physics.RaycastAll(transform.position + transform.up * 100.0f, -transform.up, Mathf.Infinity);
+			var hits = Physics.RaycastAll(transform.position + transform.up * 100.0f, -transform.up);
 			if (hits.Length > 0)
 			{
 				var sorted = hits.OrderBy(h => (h.point - transform.position).sqrMagnitude);
@@ -210,6 +260,9 @@ namespace NavMeshAreaCustomizer
 			}
 		}
 
+		/// <summary>
+		/// This method keeps area points sticked to a terrain.
+		/// </summary>
 		private void AlignAreaPoints()
 		{
 			for (int i = 0; i < transform.childCount; i++)
@@ -234,6 +287,10 @@ namespace NavMeshAreaCustomizer
 			SegmentArea(areaPoints);
 		}
 
+		/// <summary>
+		/// This method divides area lines to small segments so terrain mesh vertices outside of area shape can be aligned with them.
+		/// </summary>
+		/// <param name="areaPoints">Area points of current segment.</param>
 		private void SegmentArea(List<Vector3> areaPoints)
 		{
 			if (segmentedAreaPoints == null || segmentedAreaPoints.Length != areaPoints.Count)
@@ -262,8 +319,10 @@ namespace NavMeshAreaCustomizer
 			}
 		}
 
-		// Using collider calculated in UpdateArea function to recreate terrain mesh but only in NavigationArea,
-		// then this mesh is used for NavMesh baking
+		/// <summary>
+		/// This methods basically recreates terrain mesh but only in projected area, 
+		/// so NavMesh then can be baked on it.
+		/// </summary>
 		private async void GenerateProjectedArea()
 		{
 			isUpdating = true;
@@ -273,7 +332,6 @@ namespace NavMeshAreaCustomizer
 
 			await Task.Run(() =>
 			{
-				projectedAreaVertices.Clear();
 				projectedAreaTriangles.Clear();
 
 				for (int i = 0; i < projectedVerticesTransformed.Length; i++)
@@ -291,17 +349,31 @@ namespace NavMeshAreaCustomizer
 					var terrainVertex2 = areaWorldToLocal.MultiplyPoint(terrainLocalToWorld.MultiplyPoint(terrainVertices[index2])); // Area space
 					var terrainVertex3 = areaWorldToLocal.MultiplyPoint(terrainLocalToWorld.MultiplyPoint(terrainVertices[index3])); // Area space
 
-					bool addTriangle = false;
+					// Copying terrainVertex variables and zeroing Y coordinate (in area space) so triangle intersection is performed in 2D plane
+					var tv1 = terrainVertex1;
+					var tv2 = terrainVertex2;
+					var tv3 = terrainVertex3;
+					tv1.y = tv2.y = tv3.y = 0;
 
-					CalculateProjectedAreaVertex(terrainVertex1, index1, ref addTriangle);
-					CalculateProjectedAreaVertex(terrainVertex2, index2, ref addTriangle);
-					CalculateProjectedAreaVertex(terrainVertex3, index3, ref addTriangle);
-
-					if (addTriangle)
+					for (int j = 0; j < areaTriangles.Count; j += 3)
 					{
-						projectedAreaTriangles.Add(index1);
-						projectedAreaTriangles.Add(index2);
-						projectedAreaTriangles.Add(index3);
+						var at1 = areaTriangles[j];
+						var at2 = areaTriangles[j + 1];
+						var at3 = areaTriangles[j + 2];
+						at1.y = at2.y = at3.y = 0; // Zeroing Y coordinate (in area space) so triangle intersection is performed in 2D plane, same as with terrainVertex
+
+						// Testing if current terrain triangle intersects some of area triangles
+						if (TriangleIntersection.TriangleAndTriangle(at1, at2, at3, tv1, tv2, tv3))
+						{
+							CalculateProjectedAreaVertex(terrainVertex1, index1);
+							CalculateProjectedAreaVertex(terrainVertex2, index2);
+							CalculateProjectedAreaVertex(terrainVertex3, index3);
+
+							projectedAreaTriangles.Add(index1);
+							projectedAreaTriangles.Add(index2);
+							projectedAreaTriangles.Add(index3);
+							break;
+						}
 					}
 				}
 			});
@@ -312,87 +384,52 @@ namespace NavMeshAreaCustomizer
 			projectedAreaMesh.Clear(); // Prevents error in console when new terrain mesh is assigned 
 			projectedAreaMesh.SetVertices(projectedAreaVertices);
 			projectedAreaMesh.SetTriangles(projectedAreaTriangles, 0);
-
 			projectedAreaMesh.RecalculateBounds();
 			ProjectedArea.sharedMesh = projectedAreaMesh;
 
 			isUpdating = false;
+			AreaCalculated?.Invoke();
 
-			if (pendingCalculation)
+			if (hasPendingCalculation)
 			{
-				pendingCalculation = false;
+				hasPendingCalculation = false;
 				CalculateArea(false);
 			}
 		}
 
-		private void CalculateProjectedAreaVertex(Vector3 terrainVertexAreaSpace, int index, ref bool addTriangle)
+		private void CalculateProjectedAreaVertex(Vector3 terrainVertexAreaSpace, int index)
 		{
-			if (IsVertexInArea(terrainVertexAreaSpace))
-			{
-				if (!projectedVerticesTransformed[index])
-				{
-					projectedAreaVertices.Add(terrainVertexAreaSpace);
-					projectedVerticesTransformed[index] = true;
-				}
-				addTriangle = true;
-			}
-			else if (!projectedVerticesTransformed[index])
-			{
-				var closestAreaPoint = GetClosestAreaPoint(terrainVertexAreaSpace);
-				projectedAreaVertices.Add(closestAreaPoint);
-				projectedVerticesTransformed[index] = true;
-			}
+			if (projectedVerticesTransformed[index])
+				return;
+
+			projectedAreaVertices[index] = IsVertexInArea(terrainVertexAreaSpace) ? terrainVertexAreaSpace : GetClosestAreaPoint(terrainVertexAreaSpace);
+			projectedVerticesTransformed[index] = true;
 		}
 
 		private Vector3 GetClosestAreaPoint(Vector3 terrainVertexAreaSpace)
 		{
-			var closestAreaPointSqrDist = float.MaxValue;
-			var closestAreaPointIndex = 0;
-			for (int i = 0; i < areaPoints.Count; i++)
-			{
-				var sqrDist = (areaPoints[i] - terrainVertexAreaSpace).sqrMagnitude;
-				if (sqrDist < closestAreaPointSqrDist)
-				{
-					closestAreaPointSqrDist = sqrDist;
-					closestAreaPointIndex = i;
-				}
-			}
-
 			var closestSegmentedPointSqrDist = float.MaxValue;
 			var closestSegmentedPoint = Vector3.zero;
-			foreach (var point in segmentedAreaPoints[closestAreaPointIndex])
+			for (int i = 0; i < areaPoints.Count; i++)
 			{
-				var sqrDist = (point - terrainVertexAreaSpace).sqrMagnitude;
-				if (sqrDist < closestSegmentedPointSqrDist)
-				{
-					closestSegmentedPointSqrDist = sqrDist;
-					closestSegmentedPoint = point;
-				}
-			}
-
-			var previousIndex = closestAreaPointIndex == 0 ? areaPoints.Count - 1 : closestAreaPointIndex - 1;
-			foreach (var point in segmentedAreaPoints[previousIndex])
-			{
-				var sqrDist = (point - terrainVertexAreaSpace).sqrMagnitude;
-				if (sqrDist < closestSegmentedPointSqrDist)
-				{
-					closestSegmentedPointSqrDist = sqrDist;
-					closestSegmentedPoint = point;
-				}
-			}
-
-			var nextIndex = ++closestAreaPointIndex % areaPoints.Count;
-			foreach (var point in segmentedAreaPoints[nextIndex])
-			{
-				var sqrDist = (point - terrainVertexAreaSpace).sqrMagnitude;
-				if (sqrDist < closestSegmentedPointSqrDist)
-				{
-					closestSegmentedPointSqrDist = sqrDist;
-					closestSegmentedPoint = point;
-				}
+				closestSegmentedPoint = GetClosestAreaPoint(terrainVertexAreaSpace, i, closestSegmentedPoint, ref closestSegmentedPointSqrDist);
 			}
 
 			return closestSegmentedPoint;
+		}
+
+		private Vector3 GetClosestAreaPoint(Vector3 terrainVertexAreaSpace, int index, Vector3 closestPoint, ref float closestPointSqrDist)
+		{
+			foreach (var point in segmentedAreaPoints[index])
+			{
+				var sqrDist = (point - terrainVertexAreaSpace).sqrMagnitude;
+				if (sqrDist < closestPointSqrDist)
+				{
+					closestPointSqrDist = sqrDist;
+					closestPoint = point;
+				}
+			}
+			return closestPoint;
 		}
 
 		/// <summary>
@@ -403,7 +440,7 @@ namespace NavMeshAreaCustomizer
 		{
 			var indicesCount = 3 * (vertices.Count - 2);
 
-			// All triangles start from first vertex
+			// These are indices, all triangles start from first vertex
 			int v1 = 0;
 			int v2 = 2;
 			int v3 = 1;
@@ -417,56 +454,21 @@ namespace NavMeshAreaCustomizer
 			}
 		}
 
-		private bool IsVertexInArea(Vector3 point)
+		private bool IsVertexInArea(Vector3 pointAreaSpace)
 		{
+			pointAreaSpace.y = 0;
+
 			for (int j = 0; j < areaTriangles.Count; j += 3)
 			{
-				if (IsVertexInArea(areaTriangles[j], areaTriangles[j + 1], areaTriangles[j + 2], point))
-				{
+				var at1 = areaTriangles[j];
+				var at2 = areaTriangles[j + 1];
+				var at3 = areaTriangles[j + 2];
+				at1.y = at2.y = at3.y = 0;
+
+				if (TriangleIntersection.PointAndTriangle(at1, at2, at3, pointAreaSpace))
 					return true;
-				}
 			}
 			return false;
-		}
-
-		private bool IsVertexInArea(Vector3 posA, Vector3 posB, Vector3 posC, Vector3 point)
-		{
-			posA.y = posB.y = posC.y = point.y = 0;
-			/*if (IsOnSameSide(posA, posB, posC, point) && IsOnSameSide(posB, posC, posA, point) && IsOnSameSide(posC, posA, posB, point))
-			{
-				return true;
-			}
-			return false;*/
-
-			// Compute vectors
-			var v0 = posC - posA;
-			var v1 = posB - posA;
-			var v2 = point - posA;
-
-			// Compute dot products
-			var dot00 = Vector3.Dot(v0, v0);
-			var dot01 = Vector3.Dot(v0, v1);
-			var dot02 = Vector3.Dot(v0, v2);
-			var dot11 = Vector3.Dot(v1, v1);
-			var dot12 = Vector3.Dot(v1, v2);
-
-			// Compute barycentric coordinates
-			var invDenom = 1.0f / (dot00 * dot11 - dot01 * dot01);
-			var u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-			var v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-
-			// Check if point is in triangle
-			return (u >= 0.0f) && (v >= 0.0f) && (u + v < 1.0f);
-		}
-
-		private bool IsOnSameSide(Vector3 pos1, Vector3 pos2, Vector3 pos3, Vector3 point)
-		{
-			var a = Vector3.Cross(pos2 - pos1, point - pos1);
-			var b = Vector3.Cross(pos2 - pos1, pos3 - pos1);
-			if (Vector3.Dot(a, b) >= 0)
-				return true;
-			else
-				return false;
 		}
 
 		// NavigationArea is operating on XZ plane, so this method
@@ -482,34 +484,6 @@ namespace NavMeshAreaCustomizer
 			else
 				return worldPos;
 		}
-
-		//// Generating triangles for supplied vertices
-		//private int[] GenerateTriangles(List<Vector3> vertices)
-		//{
-		//	var indices = new int[3 * (vertices.Count - 2)];
-
-		//	// All triangles start from first vertex
-		//	int v1 = 0;
-		//	int v2 = 2;
-		//	int v3 = 1;
-
-		//	for (int i = 0; i < indices.Length; i += 3)
-		//	{
-		//		indices[i] = v1;
-		//		indices[i + 1] = v2++;
-		//		indices[i + 2] = v3++;
-		//	}
-
-		//	return indices;
-		//}
-
-		//// Method which checks if vertex lays in navigation area collider (ignoring Y coordinate)
-		//private bool IsVertexInAreaTest(Vector3 pos)
-		//{
-		//	pos.y = areaCollider.bounds.max.y;
-		//	var ray = new Ray(pos + Vector3.up, Vector3.down);
-		//	return areaCollider.Raycast(ray, out _, Mathf.Infinity);
-		//}
 #endif
 	}
 }
