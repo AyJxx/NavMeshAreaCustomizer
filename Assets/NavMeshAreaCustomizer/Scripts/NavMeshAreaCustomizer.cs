@@ -1,9 +1,8 @@
-﻿using System;
-using System.Collections;
+﻿// Copyright (c) Adam Jůva.
+// Licensed under the MIT License.
+
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
-using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.AI;
@@ -38,20 +37,12 @@ namespace NavMeshAreaCustomizer
 		private Shader navigationAreaSegmentShader;
 		private Material segmentMaterial;
 
+		private bool canUpdate = false;
+
 #if NAV_MESH_SURFACE
 		private NavMeshSurface navMeshSurface;
-		private NavMeshSurface NavMeshSurface
-		{
-			get
-			{
-				if (!navMeshSurface)
-					navMeshSurface = GetComponentInParent<NavMeshSurface>();
-				return navMeshSurface;
-			}
-		}
+		private NavMeshSurface NavMeshSurface => navMeshSurface ?? (navMeshSurface = GetComponentInParent<NavMeshSurface>());
 #endif
-
-		private bool canUpdate = false;
 
 		private bool RenderArea
 		{
@@ -62,6 +53,7 @@ namespace NavMeshAreaCustomizer
 					s.RenderArea = value;
 			}
 		}
+
 
 		private void OnValidate()
 		{
@@ -110,6 +102,7 @@ namespace NavMeshAreaCustomizer
 				return;
 
 			segmentsToRemove.Clear();
+
 			foreach (var s in segments)
 			{
 				if (s.Value != null)
@@ -145,6 +138,7 @@ namespace NavMeshAreaCustomizer
 			else
 			{
 				canUpdate = false;
+
 				if (Application.isPlaying)
 					RenderArea = showInPlayMode == ShowGizmos.Always;
 				else
@@ -179,7 +173,7 @@ namespace NavMeshAreaCustomizer
 			segmentObj.transform.localRotation = Quaternion.identity;
 
 			var segmentComp = (NavMeshAreaSegment)segmentObj.AddComponent(typeof(NavMeshAreaSegment));
-			for (int i = 0; i < 2; i++)
+			for (var i = 0; i < 2; i++)
 				UnityEditorInternal.ComponentUtility.MoveComponentUp(segmentComp);
 
 			segmentComp.Initialize();
@@ -200,7 +194,7 @@ namespace NavMeshAreaCustomizer
 		{
 			foreach (var s in segments.Values)
 			{
-				if (s)
+				if (s != null)
 					s.CalculateArea(manualInvoke);
 			}
 		}

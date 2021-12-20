@@ -1,5 +1,6 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿// Copyright (c) Adam Jůva.
+// Licensed under the MIT License.
+
 using UnityEngine;
 
 namespace NavMeshAreaCustomizer

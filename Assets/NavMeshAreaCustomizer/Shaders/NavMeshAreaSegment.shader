@@ -1,4 +1,7 @@
-﻿Shader "NavMeshAreaCustomizer/NavMeshAreaSegment"
+﻿// Copyright (c) Adam Jůva.
+// Licensed under the MIT License.
+
+Shader "NavMeshAreaCustomizer/NavMeshAreaSegment"
 {
     Properties
     {
