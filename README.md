@@ -1,4 +1,4 @@
-# NavMeshAreaCustomizer
+# NavMesh Area Customizer
 Created by **Adam Jůva**
 - Website -> [https://adamjuva.com/](https://adamjuva.com/)
 - Twitter -> [https://twitter.com/AdamJuva](https://twitter.com/AdamJuva)
